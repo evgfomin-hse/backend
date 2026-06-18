@@ -2,7 +2,7 @@ import asyncio
 
 import httpx
 import pytest
-from httpx_ws import aconnect_ws, WebSocketUpgradeError
+from httpx_ws import WebSocketUpgradeError, aconnect_ws
 from httpx_ws.transport import ASGIWebSocketTransport
 
 from tests.conftest import create_test_user, get_auth_headers
@@ -10,9 +10,9 @@ from tests.conftest import create_test_user, get_auth_headers
 
 async def test_ws_invalid_token_rejected(session, fake_redis):
     """WS connection with invalid token is rejected before accept."""
-    from app.main import app
     from app.core.db import get_async_session
     from app.core.redis import get_redis
+    from app.main import app
 
     async def override_session():
         yield session
@@ -39,9 +39,11 @@ async def test_ws_valid_token_handler_logic(fake_redis):
     Tests the handler logic directly using a mock WebSocket to avoid the
     pubsub.listen() infinite-loop hang in integration tests.
     """
-    from app.core.security import create_access_token
-    from fastapi import WebSocketDisconnect
     import uuid
+
+    from fastapi import WebSocketDisconnect
+
+    from app.core.security import create_access_token
 
     token = create_access_token(uuid.uuid4(), "player")
     game_id = "mock-game-id"
@@ -57,8 +59,13 @@ async def test_ws_valid_token_handler_logic(fake_redis):
             accepted = True
 
         async def send_text(self, data: str):
+            # Idle keepalive pings are sent between real messages (fakeredis'
+            # get_message returns immediately rather than blocking). Ignore them
+            # and only react to the forwarded game event.
+            if data == '{"type": "ping"}':
+                return
             sent_messages.append(data)
-            # Simulate client disconnect after receiving the first message
+            # Simulate client disconnect after receiving the first real message
             raise WebSocketDisconnect(code=1000)
 
         async def close(self, code: int = 1000):
@@ -117,11 +124,50 @@ async def test_ws_invalid_token_handler_rejects(fake_redis):
     assert close_code == 1008, f"Expected close code 1008, got {close_code}"
 
 
+async def test_ws_handler_swallows_send_errors(fake_redis):
+    """A non-disconnect error mid-stream is caught and the pubsub is cleaned up."""
+    import uuid
+
+    from app.core.security import create_access_token
+
+    token = create_access_token(uuid.uuid4(), "player")
+    game_id = "err-game"
+    channel = f"game:{game_id}"
+
+    class MockWebSocket:
+        async def accept(self):
+            pass
+
+        async def send_text(self, data: str):
+            if data == '{"type": "ping"}':
+                return
+            raise RuntimeError("connection blew up")
+
+        async def close(self, code: int = 1000):
+            pass
+
+    async def _delayed_publish():
+        await asyncio.sleep(0.1)
+        await fake_redis.publish(channel, '{"event": "boom"}')
+
+    publish_task = asyncio.create_task(_delayed_publish())
+
+    from app.routers.ws import game_websocket
+
+    await game_websocket(
+        game_id=game_id,
+        websocket=MockWebSocket(),
+        token=token,
+        redis=fake_redis,
+    )
+    await publish_task
+
+
 async def test_ws_endpoint_exists(session, fake_redis):
     """WS route is registered — bad token gives rejection, not 404."""
-    from app.main import app
     from app.core.db import get_async_session
     from app.core.redis import get_redis
+    from app.main import app
 
     async def override_session():
         yield session

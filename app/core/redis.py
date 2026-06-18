@@ -1,5 +1,6 @@
 import redis.asyncio as aioredis
 
+from app.core.audit import AuditedRedis
 from app.core.config import settings
 
 _pool: aioredis.ConnectionPool | None = None
@@ -20,4 +21,4 @@ async def close_redis() -> None:
 def get_redis() -> aioredis.Redis:
     if _pool is None:
         raise RuntimeError("Redis pool not initialized")
-    return aioredis.Redis(connection_pool=_pool)
+    return AuditedRedis(aioredis.Redis(connection_pool=_pool))

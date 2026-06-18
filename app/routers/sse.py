@@ -5,6 +5,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
+from app.core.audit import current_actor, log_event
 from app.core.redis import get_redis
 from app.core.security import decode_access_token
 
@@ -15,6 +16,7 @@ router = APIRouter(tags=["realtime"])
 async def game_sse(
     game_id: str,
     token: str = Query(...),
+    actor: str = Query("spectator"),
     redis: aioredis.Redis = Depends(get_redis),
 ):
     try:
@@ -22,14 +24,27 @@ async def game_sse(
     except Exception:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
 
+    current_actor.set(actor)
+    log_event("sse", f"SSE connect game:{game_id}", "client connected", actor=actor)
+
     async def event_stream() -> AsyncGenerator[str, None]:
         pubsub = redis.pubsub()
         channel = f"game:{game_id}"
         await pubsub.subscribe(channel)
         try:
-            async for message in pubsub.listen():
-                if message["type"] == "message":
-                    yield f"data: {message['data']}\n\n"
+            while True:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=15
+                )
+                if message is None:
+                    yield ": keepalive\n\n"
+                    continue
+                if message["type"] != "message":
+                    continue
+                log_event(
+                    "sse", f"SSE push game:{game_id}", message["data"], actor=actor
+                )
+                yield f"data: {message['data']}\n\n"
         except asyncio.CancelledError:
             pass
         finally:

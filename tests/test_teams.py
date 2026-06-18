@@ -42,3 +42,21 @@ async def test_delete_team(client, session):
     team_id = create_resp.json()["id"]
     resp = await client.delete(f"/teams/{team_id}", headers=headers)
     assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_get_team(client, session):
+    headers = await make_admin(session, client, "tadm5", "t5@x.com")
+    create_resp = await client.post("/teams", json={"name": "Lookup"}, headers=headers)
+    team_id = create_resp.json()["id"]
+    resp = await client.get(f"/teams/{team_id}", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Lookup"
+
+
+@pytest.mark.asyncio
+async def test_get_team_not_found(client, session):
+    import uuid
+    headers = await make_admin(session, client, "tadm6", "t6@x.com")
+    resp = await client.get(f"/teams/{uuid.uuid4()}", headers=headers)
+    assert resp.status_code == 404

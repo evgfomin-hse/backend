@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quiz Service — Live Demo</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --panel2: #172033; --line: #334155;
+    --text: #e2e8f0; --muted: #94a3b8;
+    --admin: #f59e0b; --user1: #34d399; --user2: #60a5fa; --system: #94a3b8;
+    --http: #a78bfa; --db: #2dd4bf; --redis: #f87171; --rt: #818cf8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh; overflow: hidden;
+  }
+  header {
+    padding: 8px 16px; display: flex; align-items: center; gap: 16px;
+    border-bottom: 1px solid var(--line); background: var(--panel2);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .hint { font-size: 12px; color: var(--muted); }
+  .grid {
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+    gap: 8px; padding: 8px; height: calc(100vh - 41px);
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+  }
+  .panel > .head {
+    padding: 8px 12px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px;
+  }
+  .panel > .body { padding: 10px 12px; overflow: auto; flex: 1; min-height: 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .u1 { color: var(--user1); } .u1 .dot, .dot.u1 { background: var(--user1); }
+  .u2 { color: var(--user2); } .u2 .dot, .dot.u2 { background: var(--user2); }
+  .ad { color: var(--admin); } .ad .dot, .dot.ad { background: var(--admin); }
+  .status { font-size: 11px; color: var(--muted); margin-left: auto; font-weight: 400; }
+  button {
+    background: #334155; color: var(--text); border: 1px solid #475569;
+    border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #3e4d63; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .qbox { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+  .qtext { font-size: 13px; margin-bottom: 8px; }
+  .opt { display: block; width: 100%; text-align: left; margin-bottom: 5px; }
+  .result { font-size: 12px; margin-top: 6px; }
+  .ok { color: var(--user1); } .bad { color: var(--redis); }
+  .muted { color: var(--muted); font-size: 12px; }
+
+  /* logs */
+  #logs { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11.5px; line-height: 1.5; }
+  .log { display: flex; gap: 6px; align-items: baseline; padding: 1px 0; white-space: nowrap; }
+  .log .ts { color: #64748b; }
+  .badge { font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 4px; letter-spacing: .03em; }
+  .b-http { background: rgba(167,139,250,.18); color: var(--http); }
+  .b-db { background: rgba(45,212,191,.18); color: var(--db); }
+  .b-redis { background: rgba(248,113,113,.18); color: var(--redis); }
+  .b-ws, .b-sse { background: rgba(129,140,248,.18); color: var(--rt); }
+  .b-demo, .b-auth { background: rgba(148,163,184,.18); color: var(--system); }
+  .chip { font-weight: 700; }
+  .chip.admin { color: var(--admin); } .chip.user1 { color: var(--user1); }
+  .chip.user2 { color: var(--user2); }
+  .chip.system, .chip.anonymous, .chip.spectator { color: var(--system); }
+  .log .detail { color: var(--muted); min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .filters { display: flex; gap: 6px; align-items: center; margin-left: auto; font-weight: 400; }
+  .filters label { font-size: 11px; color: var(--muted); display: flex; gap: 3px; align-items: center; }
+
+  /* standings */
+  .standings { margin-top: 10px; }
+  .standings h3 {
+    font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .04em; margin: 10px 0 4px;
+  }
+  table.stt { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.stt th, table.stt td { padding: 3px 6px; text-align: left; border-bottom: 1px solid var(--line); }
+  table.stt th { color: var(--muted); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; }
+  table.stt td.num, table.stt th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.stt td.rank { color: var(--muted); width: 1.4em; }
+  table.stt tbody tr:last-child td { border-bottom: none; }
+  .pts { color: var(--admin); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Quiz Service — Live Demo</h1>
+  <span class="hint">Admin drives the game · User 1 watches via <b>SSE</b> · User 2 via <b>WebSocket</b> · every DB / Redis / HTTP call is tagged with who caused it</span>
+</header>
+
+<div class="grid">
+  <!-- USER 1 -->
+  <section class="panel">
+    <div class="head u1"><span class="dot"></span> User 1 — Uma (Team Red, SSE)
+      <span class="status" id="s-u1">not connected</span></div>
+    <div class="body">
+      <div class="row">
+        <button id="b-u1-conn" disabled>Connect (SSE)</button>
+      </div>
+      <div id="q-u1"><p class="muted">Waiting for a question…</p></div>
+    </div>
+  </section>
+
+  <!-- USER 2 -->
+  <section class="panel">
+    <div class="head u2"><span class="dot"></span> User 2 — Theo (Team Blue, WebSocket)
+      <span class="status" id="s-u2">not connected</span></div>
+    <div class="body">
+      <div class="row">
+        <button id="b-u2-conn" disabled>Connect (WS)</button>
+      </div>
+      <div id="q-u2"><p class="muted">Waiting for a question…</p></div>
+    </div>
+  </section>
+
+  <!-- ADMIN -->
+  <section class="panel">
+    <div class="head ad"><span class="dot"></span> Admin — Ada
+      <span class="status" id="s-ad">start by seeding data</span></div>
+    <div class="body">
+      <div class="row">
+        <button id="b-reset">1 · Reset &amp; Seed</button>
+        <button id="b-create" disabled>2 · Create Game</button>
+        <button id="b-start" disabled>3 · Start</button>
+        <button id="b-next" disabled>4 · Next Question</button>
+        <button id="b-finish" disabled>5 · Finish</button>
+      </div>
+      <div id="admin-info" class="muted">No data yet. Click “Reset &amp; Seed” to create an admin, two players, two teams and three questions.</div>
+      <div class="standings">
+        <div class="row" style="margin:6px 0 0">
+          <button id="b-standings" style="padding:2px 7px">Refresh standings</button>
+        </div>
+        <h3>Teams</h3>
+        <div id="st-teams"><p class="muted">No standings yet.</p></div>
+        <h3>Players</h3>
+        <div id="st-players"><p class="muted">No standings yet.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LOGS -->
+  <section class="panel">
+    <div class="head">Logs — who provoked what
+      <div class="filters">
+        <label><input type="checkbox" class="flt" value="http" checked>HTTP</label>
+        <label><input type="checkbox" class="flt" value="db" checked>DB</label>
+        <label><input type="checkbox" class="flt" value="redis" checked>Redis</label>
+        <label><input type="checkbox" class="flt" value="rt" checked>WS/SSE</label>
+        <button id="b-clear" style="padding:2px 7px">clear</button>
+      </div>
+    </div>
+    <div class="body" id="logs"></div>
+  </section>
+</div>
+
+<script>
+const state = { tokens: {}, ids: null, gameId: null, gq: { user1: null, user2: null } };
+const $ = (id) => document.getElementById(id);
+
+// ---- API helper: tags every request with the actor that made it ----
+async function api(actor, method, path, body) {
+  const headers = { "X-Demo-Actor": actor };
+  if (state.tokens[actor]) headers["Authorization"] = "Bearer " + state.tokens[actor];
+  if (body) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new Error((data && data.detail) || res.status);
+  return data;
+}
+
+// ---------------- Admin flow ----------------
+$("b-reset").onclick = async () => {
+  setStatus("s-ad", "seeding…");
+  try {
+    const r = await api("admin", "POST", "/demo/reset");
+    state.tokens = r.tokens; state.ids = r; state.gameId = null;
+    state.gq = { user1: null, user2: null };
+    $("admin-info").innerHTML =
+      `Seeded ✓ — admin + <span class="u1">user1 (${r.users.user1.team})</span> + ` +
+      `<span class="u2">user2 (${r.users.user2.team})</span> + 3 questions.`;
+    enable(["b-create", "b-u1-conn", "b-u2-conn"]); disable(["b-start","b-next","b-finish"]);
+    setStatus("s-ad", "ready — create a game");
+    setStatus("s-u1", "ready to connect"); setStatus("s-u2", "ready to connect");
+    resetQ("u1"); resetQ("u2");
+    refreshStandings();
+  } catch (e) { setStatus("s-ad", "error: " + e.message); }
+};
+
+$("b-create").onclick = async () => {
+  try {
+    const g = await api("admin", "POST", "/games", {
+      title: "Demo Quiz", team_ids: state.ids.team_ids, question_ids: state.ids.question_ids,
+    });
+    state.gameId = g.id;
+    setStatus("s-ad", "game created — connect players, then Start");
+    enable(["b-start"]);
+  } catch (e) { setStatus("s-ad", "error: " + e.message); }
+};
+
+$("b-start").onclick = async () => {
+  try {
+    await api("admin", "POST", `/games/${state.gameId}/start`);
+    setStatus("s-ad", "running — push questions"); enable(["b-next", "b-finish"]);
+  } catch (e) { setStatus("s-ad", "error: " + e.message); }
+};
+
+$("b-next").onclick = async () => {
+  try {
+    const gq = await api("admin", "POST", `/games/${state.gameId}/next-question`);
+    setStatus("s-ad", "question #" + gq.round_number + " pushed");
+  } catch (e) { setStatus("s-ad", e.message); }
+};
+
+$("b-finish").onclick = async () => {
+  try {
+    await api("admin", "POST", `/games/${state.gameId}/finish`);
+    setStatus("s-ad", "game finished"); disable(["b-next", "b-finish"]);
+    refreshStandings();
+  } catch (e) { setStatus("s-ad", "error: " + e.message); }
+};
+
+// ---------------- Players ----------------
+$("b-u1-conn").onclick = () => connectSSE();
+$("b-u2-conn").onclick = () => connectWS();
+
+function connectSSE() {
+  if (!state.gameId) { setStatus("s-u1", "no game yet — Admin must Create Game"); return; }
+  const url = `/sse/games/${state.gameId}?token=${state.tokens.user1}&actor=user1`;
+  const es = new EventSource(url);
+  es.onopen = () => setStatus("s-u1", "● live (SSE)");
+  es.onmessage = (e) => handleGameEvent("user1", JSON.parse(e.data));
+  es.onerror = () => setStatus("s-u1", "disconnected");
+  $("b-u1-conn").disabled = true;
+}
+
+function connectWS() {
+  if (!state.gameId) { setStatus("s-u2", "no game yet — Admin must Create Game"); return; }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${proto}://${location.host}/ws/games/${state.gameId}?token=${state.tokens.user2}&actor=user2`;
+  const ws = new WebSocket(url);
+  ws.onopen = () => setStatus("s-u2", "● live (WS)");
+  ws.onmessage = (e) => handleGameEvent("user2", JSON.parse(e.data));
+  ws.onclose = () => setStatus("s-u2", "disconnected");
+  $("b-u2-conn").disabled = true;
+}
+
+function handleGameEvent(actor, msg) {
+  const key = actor === "user1" ? "u1" : "u2";
+  if (msg.type === "game_started") { setStatus("s-" + key, "● live — game started"); }
+  else if (msg.type === "game_over") { resetQ(key, "Game over."); }
+  else if (msg.type === "question") {
+    state.gq[actor] = msg.game_question_id;
+    renderQuestion(actor, key, msg);
+  }
+}
+
+function renderQuestion(actor, key, msg) {
+  const box = $("q-" + key);
+  const opts = msg.question.options.map((o, i) =>
+    `<button class="opt" data-i="${i}">${i + 1}. ${escapeHtml(o)}</button>`).join("");
+  box.innerHTML =
+    `<div class="qbox"><div class="qtext">Round ${msg.round}: ${escapeHtml(msg.question.text)}</div>` +
+    `${opts}<div class="result" id="res-${key}"></div></div>`;
+  box.querySelectorAll(".opt").forEach((b) =>
+    b.onclick = () => submitAnswer(actor, key, parseInt(b.dataset.i, 10)));
+}
+
+async function submitAnswer(actor, key, idx) {
+  $("q-" + key).querySelectorAll(".opt").forEach((b) => b.disabled = true);
+  try {
+    const a = await api(actor, "POST",
+      `/games/${state.gameId}/questions/${state.gq[actor]}/answer`, { chosen_option_index: idx });
+    $("res-" + key).innerHTML = a.is_correct
+      ? `<span class="ok">✓ Correct! +${a.points_awarded}</span>`
+      : `<span class="bad">✗ Wrong</span>`;
+    refreshStandings();
+  } catch (e) { $("res-" + key).innerHTML = `<span class="bad">${e.message}</span>`; }
+}
+
+// ---------------- Standings ----------------
+$("b-standings").onclick = () => refreshStandings();
+
+async function refreshStandings() {
+  try {
+    const s = await api("admin", "GET", "/demo/standings");
+    renderTeams(s.teams);
+    renderPlayers(s.players);
+  } catch (e) { /* ignore — table just keeps its last state */ }
+}
+
+function renderTeams(teams) {
+  const box = $("st-teams");
+  if (!teams || !teams.length) { box.innerHTML = `<p class="muted">No standings yet.</p>`; return; }
+  const rows = teams.map((t, i) =>
+    `<tr><td class="rank">${i + 1}</td><td>${escapeHtml(t.name)}</td>` +
+    `<td class="num pts">${t.total_points}</td><td class="num">${t.games_played}</td>` +
+    `<td class="num">${t.games_won}</td></tr>`).join("");
+  box.innerHTML =
+    `<table class="stt"><thead><tr><th></th><th>Team</th>` +
+    `<th class="num">Pts</th><th class="num">Played</th><th class="num">Won</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table>`;
+}
+
+function renderPlayers(players) {
+  const box = $("st-players");
+  if (!players || !players.length) { box.innerHTML = `<p class="muted">No standings yet.</p>`; return; }
+  const rows = players.map((p, i) =>
+    `<tr><td class="rank">${i + 1}</td><td>${escapeHtml(p.first_name + " " + p.last_name)}</td>` +
+    `<td class="num pts">${p.total_points}</td><td class="num">${p.correct_answers}</td></tr>`).join("");
+  box.innerHTML =
+    `<table class="stt"><thead><tr><th></th><th>Player</th>` +
+    `<th class="num">Pts</th><th class="num">Correct</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table>`;
+}
+
+// ---------------- Logs ----------------
+const RT = new Set(["ws", "sse"]);
+const enabled = { http: true, db: true, redis: true, rt: true };
+const logEl = $("logs");
+
+function logVisible(cat) {
+  if (RT.has(cat)) return enabled.rt;
+  if (cat in enabled) return enabled[cat];
+  return true; // demo/auth always shown
+}
+
+function addLog(ev) {
+  const div = document.createElement("div");
+  div.className = "log"; div.dataset.cat = ev.category;
+  if (!logVisible(ev.category)) div.style.display = "none";
+  div.innerHTML =
+    `<span class="ts">${ev.ts}</span>` +
+    `<span class="badge b-${ev.category}">${ev.category.toUpperCase()}</span>` +
+    `<span class="chip ${ev.actor}">${ev.actor}</span>` +
+    `<span>${escapeHtml(ev.action)}</span>` +
+    (ev.detail ? `<span class="detail">— ${escapeHtml(ev.detail)}</span>` : "");
+  logEl.appendChild(div);
+  while (logEl.childElementCount > 600) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+document.querySelectorAll(".flt").forEach((cb) => cb.onchange = () => {
+  enabled[cb.value] = cb.checked;
+  logEl.querySelectorAll(".log").forEach((l) => {
+    l.style.display = logVisible(l.dataset.cat) ? "" : "none";
+  });
+});
+$("b-clear").onclick = () => logEl.innerHTML = "";
+
+const logStream = new EventSource("/demo/logs");
+logStream.onmessage = (e) => addLog(JSON.parse(e.data));
+
+// ---------------- helpers ----------------
+function setStatus(id, t) { $(id).textContent = t; }
+function enable(ids) { ids.forEach((i) => $(i).disabled = false); }
+function disable(ids) { ids.forEach((i) => $(i).disabled = true); }
+function resetQ(key, t) { $("q-" + key).innerHTML = `<p class="muted">${t || "Waiting for a question…"}</p>`; }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+</script>
+</body>
+</html>

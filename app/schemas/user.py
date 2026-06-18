@@ -10,6 +10,7 @@ from app.models.user import UserRole
 class UserCreate(BaseModel):
     first_name: str
     last_name: str
+    middle_name: Optional[str] = None
     email: EmailStr
     login: str
     password: str
@@ -20,6 +21,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    middle_name: Optional[str] = None
     email: Optional[EmailStr] = None
     login: Optional[str] = None
     role: Optional[UserRole] = None
@@ -30,6 +32,7 @@ class UserResponse(BaseModel):
     id: uuid.UUID
     first_name: str
     last_name: str
+    middle_name: Optional[str] = None
     email: str
     login: str
     role: UserRole

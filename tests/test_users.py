@@ -66,3 +66,47 @@ async def test_patch_user_admin(client, session):
     resp = await client.patch(f"/users/{user.id}", json={"first_name": "Updated"}, headers=headers)
     assert resp.status_code == 200
     assert resp.json()["first_name"] == "Updated"
+
+
+@pytest.mark.asyncio
+async def test_get_user_admin(client, session):
+    headers = await create_admin(session, client)
+    from tests.conftest import create_test_user
+    user = await create_test_user(session, login="getme", email="getme@example.com")
+    resp = await client.get(f"/users/{user.id}", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["login"] == "getme"
+
+
+@pytest.mark.asyncio
+async def test_get_user_not_found(client, session):
+    import uuid
+    headers = await create_admin(session, client)
+    resp = await client.get(f"/users/{uuid.uuid4()}", headers=headers)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_user_duplicate_email(client, session):
+    headers = await create_admin(session, client)
+    payload = {
+        "first_name": "Dup", "last_name": "Email",
+        "email": "dupe@example.com", "login": "dupe1", "password": "pass123",
+    }
+    await client.post("/users", json=payload, headers=headers)
+    resp = await client.post("/users", json={**payload, "login": "dupe2"}, headers=headers)
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_create_user_duplicate_login(client, session):
+    headers = await create_admin(session, client)
+    payload = {
+        "first_name": "Dup", "last_name": "Login",
+        "email": "duplogin1@example.com", "login": "duplogin", "password": "pass123",
+    }
+    await client.post("/users", json=payload, headers=headers)
+    resp = await client.post(
+        "/users", json={**payload, "email": "duplogin2@example.com"}, headers=headers
+    )
+    assert resp.status_code == 409
